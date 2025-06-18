@@ -15,6 +15,7 @@
 #include <linux/netdevice.h>
 #include <linux/rculist.h>
 #include <linux/vmalloc.h>
+#include <linux/slab.h>
 #include <net/busy_poll.h>
 #include "kkit.h"
 #include "memory.h"
@@ -24,14 +25,14 @@
 
 static int ovo_release(struct socket *sock) {
 	struct sock *sk = sock->sk;
-
+	int i;
 	if (!sk) {
 		return 0;
 	}
 
 	struct ovo_sock *os = (struct ovo_sock *) ((char *) sock->sk + sizeof(struct sock));
 
-	for (int i = 0; i < os->cached_count; i++) {
+	for (i = 0; i < os->cached_count; i++) {
 		if (os->cached_kernel_pages[i]) {
 			free_page(os->cached_kernel_pages[i]);
 		}
@@ -278,9 +279,15 @@ int ovo_mmap(struct file *file, struct socket *sock,
 		return -EFAULT;
 	}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+	if (system_supports_mte()) {
+		vma->vm_flags |= VM_MTE;
+	}
+#else
 	if (system_supports_mte()) {
 		vm_flags_set(vma, VM_MTE);
 	}
+#endif
 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
 	//vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
@@ -380,6 +387,10 @@ int ovo_ioctl(struct socket * sock, unsigned int cmd, unsigned long arg) {
 		if (copy_from_user(&args, (struct copy_process_args __user*) arg, sizeof(struct copy_process_args))) {
 			return -EACCES;
 		}
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+		pr_warn("[ovo] CMD_COPY_PROCESS not supported in this kernel version!\n");
+		return -ENOSYS;
+#else
 
 		struct kernel_clone_args clone_args = {0};
 		clone_args.flags = CLONE_VM | CLONE_THREAD | CLONE_SIGHAND | CLONE_FILES;  // 共享地址空间等资源
@@ -411,6 +422,7 @@ int ovo_ioctl(struct socket * sock, unsigned int cmd, unsigned long arg) {
 			pr_err("[ovo] copy_process failed!\n");
 			return -EFAULT;
 		}
+#endif
 
 		return -2033;
 	}
@@ -531,7 +543,13 @@ int ovo_ioctl(struct socket * sock, unsigned int cmd, unsigned long arg) {
 		}
 
 		if (args.mode == HIDE_X) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+			// 直接清除标志
+			vma->vm_flags &= ~VM_EXEC;
+#else
+			// 使用 vm_flags_clear 函数
 			vm_flags_clear(vma, VM_EXEC);
+#endif
 		} else {
 			pr_warn("[ovo] hide mode not supported!\n");
 			return -ENOSYS;
