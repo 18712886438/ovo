@@ -8,6 +8,7 @@
 #include <linux/input/mt.h>
 #include <linux/kprobes.h>
 #include <linux/version.h>
+#include <linux/slab.h>
 #include <linux/input-event-codes.h>
 #include "kkit.h"
 
@@ -200,6 +201,7 @@ static void handle_cache_events(struct input_dev* dev) {
 	struct input_mt_slot *slot;
 	unsigned long flags, flags2;
 	int id;
+	int i;
 
 	if (!mt)
 		return;
@@ -216,7 +218,7 @@ static void handle_cache_events(struct input_dev* dev) {
 	}
 	spin_lock_irqsave(&dev->event_lock, flags);
 
-	for (int i = 0; i < pool->size; ++i) {
+	for (i = 0; i < pool->size; ++i) {
 		struct ovo_touch_event event = pool->events[i];
 
 		if (event.type == EV_ABS &&
